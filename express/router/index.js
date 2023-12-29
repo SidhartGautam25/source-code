@@ -15,16 +15,21 @@ var objectRegExp = /^\[object (\S+)\]$/;
 var slice = Array.prototype.slice;
 var toString = Object.prototype.toString;
 
-var proto = module.exports = function(options) {
-  var opts = options || {};
 
+var proto = module.exports = function(options) {
+    //provided option
+  var opts = options || {};
+ 
+  //main router function which just call router.handle() 
   function router(req, res, next) {
     router.handle(req, res, next);
   }
 
   // mixin Router class functions
-  setPrototypeOf(router, proto)
+  setPrototypeOf(router, proto)//mixing proto methods to router 
 
+
+  //variables which we need ahead
   router.params = {};
   router._params = [];
   router.caseSensitive = opts.caseSensitive;
@@ -32,14 +37,38 @@ var proto = module.exports = function(options) {
   router.strict = opts.strict;
   router.stack = [];
 
+
+  //returning a function that is extended with methods from a prototype provides a flexible
+  // and organized way to create and manage instances of a router with shared functionality.
+  // It aligns with principles of modularity, extensibility, and code organization.
   return router;
 };
 
 
+//The proto.param method in the Express router is responsible for handling route parameters. 
+//It allows you to define middleware functions that will be executed when certain parameters are present in the route
+/**
+ * 
+ * // Define a param middleware function for 'userId'
+app.param('userId', function (req, res, next, userId) {
+  // Custom logic for handling 'userId'
+  req.user = getUserById(userId);
+  next();
+});
 
+// Route with the 'userId' parameter
+app.get('/users/:userId', function (req, res) {
+  // Access the 'user' property set by the param middleware
+  res.send(`User details: ${JSON.stringify(req.user)}`);
+});
+ */
+//from the above example you can see what is the use of of this method in express app
+//also from the example we can see that this param method takes two parameters,
+//first is parameter name and then a function which do something when that parameter is used in a call
 proto.param = function param(name, fn) {
   // param logic
   if (typeof name === 'function') {
+    //name should not be a function because that it deprecated
     deprecate('router.param(fn): Refactor to use path params');
     this._params.push(name);
     return;
@@ -47,15 +76,23 @@ proto.param = function param(name, fn) {
 
   // apply param functions
   var params = this._params;
+  //this._params is an array that holds the existing param functions for the router. 
+  //These functions are associated with specific parameter names and are executed when a route contains those parameters.
   var len = params.length;
   var ret;
+  // ret is a variable that will be used to store the return value of param functions during the iteration.
+  // If a param function returns a value (which is used to modify the middleware function), that value will be stored in ret.
 
   if (name[0] === ':') {
+    //initializing parameters with : is deprecated
     deprecate('router.param(' + JSON.stringify(name) + ', fn): Use router.param(' + JSON.stringify(name.slice(1)) + ', fn) instead')
+    //remove that : from the parameters
     name = name.slice(1)
   }
 
   for (var i = 0; i < len; ++i) {
+    // in this if condition,first a function is called and it is params[i](name,fn) and its return type is stored
+    // in ret and then if is checking it is true or false
     if (ret = params[i](name, fn)) {
       fn = ret;
     }
@@ -64,6 +101,7 @@ proto.param = function param(name, fn) {
   // ensure we end up with a
   // middleware function
   if ('function' !== typeof fn) {
+    // fn should be a function
     throw new Error('invalid param() call for ' + name + ', got ' + fn);
   }
 
@@ -71,17 +109,35 @@ proto.param = function param(name, fn) {
   return this;
 };
 
+//The callback function that signals the completion of the current middleware or route handler.
+//simply means next function
 proto.handle = function handle(req, res, out) {
+    // The proto.handle() method sets up the initial state, prepares the request object, and invokes the next
+    // function to start the routing process.
+    // The next function iterates through the middleware and routes, allowing each to handle the request or pass control to the next.
+
   var self = this;
+  // The line var self = this; is a common JavaScript pattern used to capture the reference to the current
+  // object (this) in a variable named self
+  // This pattern is often used to avoid issues related to the changing context of this within nested functions or callbacks.
 
   debug('dispatching %s %s', req.method, req.url);
 
-  var idx = 0;
-  var protohost = getProtohost(req.url) || ''
-  var removed = '';
-  var slashAdded = false;
-  var sync = 0
-  var paramcalled = {};
+  var idx = 0; // This variable is used as an index to keep track of the current layer in the stack that is being processed.
+  var protohost = getProtohost(req.url) || ''//protohost is a string representing the protocol and host of the URL.
+  // The getProtohost function is used to extract this information from the req.url.
+  // If getProtohost returns null or undefined, an empty string is assigned to protohost.
+
+  var removed = ''; //This variable is used to store a portion of the URL that may be removed during processing.
+  // It is initially an empty string.
+
+  var slashAdded = false;// This boolean variable is used to track whether a leading slash has been added
+  // to the URL during processing.
+
+  var sync = 0//sync is there so that calls to next dont go infinite
+
+  var paramcalled = {};// This object is used to keep track of parameters that have been called during the
+  // processing of layers. It helps in handling parameters efficiently and avoids redundant processing.
 
   // store options for OPTIONS request
   // only used if OPTIONS request
@@ -355,16 +411,29 @@ proto.process_params = function process_params(layer, called, req, res, done) {
   param();
 };
 
-
+// This function is used to add middleware functions to the router stack
 proto.use = function use(fn) {
   var offset = 0;
-  var path = '/';
+
+  var path = '/';//  The default path for the middleware is set to '/'. This path will be used if a 
+  // specific path is not provided when adding middleware.
 
   // default path to '/'
   // disambiguate router.use([fn])
   if (typeof fn !== 'function') {
-    var arg = fn;
+    // responsible for handling cases where the first argument might be a path instead of a middleware function.
+    // It checks if the first argument is not a function and then tries to determine if it's a path or an array of paths.
+    /**
+     * 
+        // Example 1: Use middleware with a specific path
+           app.use('/special', middlewareFunction);
 
+        // Example 2: Use middleware with an array of paths
+           app.use(['/path1', '/path2'], middlewareFunction);
+
+     */
+    var arg = fn;
+    //This is done to handle the case where an array of paths is mistakenly provided as the first argument.
     while (Array.isArray(arg) && arg.length !== 0) {
       arg = arg[0];
     }
@@ -372,26 +441,45 @@ proto.use = function use(fn) {
     // first arg is the path
     if (typeof arg !== 'function') {
       offset = 1;
+      // The offset variable is used to determine where the middleware functions start in the arguments. It is initially set to 0.
       path = fn;
     }
   }
 
-  var callbacks = flatten(slice.call(arguments, offset));
+  var callbacks = flatten(slice.call(arguments, offset));//It slices the arguments starting from the offset index
+  // In JavaScript, the arguments object is an array-like object available in all functions,
+  // representing the arguments passed to that function.
+  
+  
+  // The slice.call() method is used to convert the arguments object into an array. The slice method is a generic
+  // method in JavaScript that can be applied to arrays or array-like objects
+
+  //   The flatten function is used to transform nested arrays into a flat array. 
+  // It's a utility function that ensures that middleware functions provided to the proto.use method are all 
+  // collected into a single flat array, regardless of whether they are provided as individual arguments, as an array, 
+  // or within nested arrays.
+
+  // The callbacks array, in this context, will contain all the middleware functions in a flat structure,
+  // making it easier to iterate over them and process them uniformly.
+
 
   if (callbacks.length === 0) {
+    //when there is no middleware given
     throw new TypeError('Router.use() requires a middleware function')
   }
 
   for (var i = 0; i < callbacks.length; i++) {
-    var fn = callbacks[i];
+    var fn = callbacks[i]; //middleware function
 
     if (typeof fn !== 'function') {
+        // middleware should be a function 
       throw new TypeError('Router.use() requires a middleware function but got a ' + gettype(fn))
     }
 
     // add the middleware
     debug('use %o %s', path, fn.name || '<anonymous>')
 
+    //creating a layer according to given path and given middleware function
     var layer = new Layer(path, {
       sensitive: this.caseSensitive,
       strict: false,
@@ -399,11 +487,22 @@ proto.use = function use(fn) {
     }, fn);
 
     layer.route = undefined;
+    // layer.route: This line sets the route property of the layer to undefined. The route property is used to reference
+    // a route when the layer is part of a route. However, since this layer is a standalone middleware (not part of a route),
+    // the route property is not applicable and is set to undefined.
 
-    this.stack.push(layer);
+    this.stack.push(layer); //now push this layer into the stack of app
   }
 
   return this;
+  // this one simple line is very important and serve a very important purpose 
+  // we know that we can write app.use(middileware1).use(middleware2)
+  // this is called chaining
+  // and we are able to do that just because of this line
+  // since this function is returning this means it is returning app
+  // so we can replace app.use() with app
+  // hence app.use(mid1).use(mid2) is equal to app.use(mid2)
+
 };
 
 proto.route = function route(path) {

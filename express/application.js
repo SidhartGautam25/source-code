@@ -97,8 +97,11 @@ app.defaultConfiguration = function defaultConfiguration() {
     });
 };
 
+
+// initialising the router and doing some extra stuff
 app.lazyrouter = function lazyrouter() {
     if (!this._router) {
+        // if router is not initialised
         this._router = new Router({
             caseSensitive: this.enabled('case sensitive routing'),
             strict: this.enabled('strict routing')
@@ -106,6 +109,8 @@ app.lazyrouter = function lazyrouter() {
 
         this._router.use(query(this.get('query parser fn')));
         this._router.use(middleware.init(this));
+        // to understand these two lines just read query and init file under
+        // middleware folder
     }
 };
 
@@ -129,9 +134,14 @@ app.handle = function handle(req, res, callback) {
     router.handle(req, res, done);
 };
 
-app.use = function use(fn) {
+app.use = function use(fn) {// takes a middleware as an argument
     var offset = 0;
+    // offset variable is used to know that first argument of use method is
+    // a function or not/
+    // if not a function,offest value becomes 0
+
     var path = '/';
+    // default path for use method is '/'
 
     // default path to '/'
     // disambiguate app.use([fn])
@@ -140,6 +150,7 @@ app.use = function use(fn) {
 
         while (Array.isArray(arg) && arg.length !== 0) {
             arg = arg[0];
+            // go to router.use() method to understand this code
         }
 
         // first arg is the path
@@ -159,15 +170,34 @@ app.use = function use(fn) {
     this.lazyrouter();
     var router = this._router;
 
+    // array of middlewres
     fns.forEach(function (fn) {
         // non-express app
         if (!fn || !fn.handle || !fn.set) {
+            // just understand that it uses router.use() to handle the middleware
             return router.use(path, fn);
         }
 
         debug('.use app under %s', path);
+
         fn.mountpath = path;
+        //fn.mountpath = path;: This line sets the mountpath property on the middleware 
+        //function (fn). The mountpath represents the path pattern at which the middleware is 
+        //mounted in the parent application. This is useful when the middleware needs to be 
+        //aware of its base path within the application.
+
+        //For example, if you have a middleware that serves static files and it is mounted at 
+        //a specific path, setting mountpath allows the middleware to construct the correct 
+        //file paths based on its mount location.
+
+
         fn.parent = this;
+        // fn.parent = this;: This line sets the parent property on the middleware 
+        // function (fn) to reference the parent application. It allows the middleware to have 
+        // a reference to the Express application it is mounted on. This can be useful if the 
+        // middleware needs to access properties or methods of the parent application.
+
+
 
         // restore .app property on req and res
         router.use(path, function mounted_app(req, res, next) {
