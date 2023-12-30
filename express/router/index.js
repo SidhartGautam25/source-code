@@ -332,9 +332,43 @@ proto.handle = function handle(req, res, out) {
 
     // Capture one-time layer values
     // mergeParams is a function which simply add first arg object parameters to second obj
+
+    // In Express.js, the mergeParams property is a configuration option for a router. 
+    // It determines whether the router should merge route parameters from its parent 
+    // router. The self in self.mergeParams typically refers to the router instance itself.
+
+    //  By default, the mergeParams property is set to true. This means that a 
+    // router inherits and merges the route parameters from its parent router.
+
+    /**
+     * const parentRouter = express.Router();
+       const childRouter = express.Router();
+
+       parentRouter.param('id', (req, res, next, id) => {
+           console.log('Parent router parameter:', id);
+           next();
+       });
+
+        childRouter.get('/:id', (req, res) => {
+            console.log('Child router parameter:', req.params.id);
+            res.send('Nested Route');
+        });
+
+        // Enable mergeParams for the childRouter
+        childRouter.mergeParams = true;
+
+        app.use('/parent', parentRouter);
+        parentRouter.use('/child', childRouter);
+     */
+    // In this example, a request to /parent/child/123 will trigger both the parent 
+    // and child router handlers. The child router can access the id parameter set 
+    // by the parent router because mergeParams is enabled.
+
+    //merging is done
     req.params = self.mergeParams
       ? mergeParams(layer.params, parentParams)
       : layer.params;
+    // finally layerpath get accessed
     var layerPath = layer.path;
 
     // this should be done for the layer
@@ -351,16 +385,92 @@ proto.handle = function handle(req, res, out) {
     });
   }
 
+  // The trim_prefix function is responsible for trimming the matched portion of the 
+  // URL from the request URL, adjusting the req.url, req.baseUrl, and other related 
+  // properties.
+  /**
+   * 
+   * ex:
+   *   app.use('/example', function(req, res, next) {
+            // Route handler logic
+       });
+
+       Now, suppose you make a request to your server with the URL path 
+       /example/some/route. When this request matches the /example route, 
+       the trim_prefix function is invoked.
+
+       Here's what happens step by step:
+
+       Matching:
+
+          The route path is /example.
+          The current request path is /example/some/route.
+
+       Prefix Check:
+
+          The function checks if the route path (/example) is a prefix match for the 
+          request path (/example/some/route), which is true.
+
+       Trimming:
+
+            The function trims off the matched part (/example) from the request URL.
+            The modified req.url becomes /some/route.
+
+       Base URL Adjustment:
+
+            The function adjusts the req.baseUrl to /example.
+            If there's a trailing slash in the trimmed part, 
+            it removes it from req.baseUrl.
+            So, after this process, the request is effectively transformed, 
+            and the Express router handles it as if the request path were /some/route. 
+            The req.baseUrl is adjusted to reflect the matched route.
+   */
   function trim_prefix(layer, layerError, layerPath, path) {
     if (layerPath.length !== 0) {
       // Validate path is a prefix match
+      
       if (layerPath !== path.slice(0, layerPath.length)) {
+        /**
+       * Suppose you have a middleware associated with the path /example. 
+       * If the current request path is /another/example, this condition will be 
+       * true because /example is not a prefix of /another/example. As a result, 
+       * the function will call next(layerError), passing control to the next 
+       * middleware or route in the stack.
+       */
+      /**
+       * layerPath is the path associated with the current layer in the Express router.
+         path is the remaining path from the request.
+
+        Prefix Check:
+
+             path.slice(0, layerPath.length) extracts a substring of the path with a 
+             length equal to the length of layerPath.
+             The condition layerPath !== path.slice(0, layerPath.length) checks if the 
+             layerPath is not equal to this extracted prefix.
+
+        Next Middleware/Route:
+
+             If the condition is true, it means that the layerPath is not a prefix of 
+             the path.
+             In this case, the next(layerError) is called, passing along the error to 
+             the next middleware or route.
+             The return; statement ensures that the function exits early.
+       */
         next(layerError)
         return
       }
 
       // Validate path breaks on a path separator
+      // c is a variable that represents the character in the path string at the position 
+      // immediately following the matched layerPath. Let's break it down:
+      /**
+       * layerPath: /users
+         path: /users/123
+         In this case, layerPath.length is 6, and path[6] is / (the character immediately 
+         following the end of layerPath). So, c would be / in this example.
+       */
       var c = path[layerPath.length]
+      
       if (c && c !== '/' && c !== '.') return next(layerError)
 
       // Trim off the part of the url that matches the route
@@ -386,95 +496,200 @@ proto.handle = function handle(req, res, out) {
     if (layerError) {
       layer.handle_error(layerError, req, res, next);
     } else {
+      // finally handling the request
       layer.handle_request(req, res, next);
     }
   }
 };
 
-
+// responsible for processing route parameters for a given layer
 proto.process_params = function process_params(layer, called, req, res, done) {
+
+  // getting the params of this Router instance  
   var params = this.params;
 
   // captured parameters from the layer, keys and values
+  // layer.keys contain the parameter variables
   var keys = layer.keys;
 
   // fast track
   if (!keys || keys.length === 0) {
+    // since there are no keys,there is no need to process or do anything
+    // done means job is over of processing parameters
     return done();
   }
 
-  var i = 0;
-  var name;
-  var paramIndex = 0;
-  var key;
-  var paramVal;
-  var paramCallbacks;
+  
+  var i = 0; // This variable is used as a counter to keep track of the index while iterating 
+  // over the keys array. It helps in traversing the array of keys associated with
+  // route parameters.
+
+  var name; // : This variable is used to store the name of the current route parameter.
+  // During the iteration over keys, name holds the name of the parameter associated 
+  // with the current iteration.
+
+  var paramIndex = 0; // current index of the callback function in paramCallbacks array
+
+  var key; // This variable holds the current key object during the iteration over the 
+  // keys array. A key object typically contains information about a route parameter, 
+  // such as its name.
+
+  var paramVal; //  This variable is an object that keeps track of whether a specific 
+  // route parameter has been called before and, if so, with what values. It helps 
+  // in determining whether to execute the parameter callbacks or skip them based on 
+  // previous calls.
+
+  var paramCallbacks; // This variable holds an array of callback functions 
+  // associated with a specific route parameter. These callbacks are functions that 
+  // will be executed in sequence for the processing of the route parameter.
   var paramCalled;
 
   // process params in order
   // param callbacks can be async
   function param(err) {
     if (err) {
+      // if error just call done()
       return done(err);
     }
 
     if (i >= keys.length ) {
+      // iteration is finally over
       return done();
     }
-
+    
+    // The outer loop (i loop) iterates through each route parameter.
+    // For each route parameter, there is an inner loop (paramIndex loop) that iterates 
+    // through the callbacks associated with that specific parameter.
+    // At the start of processing a new route parameter, we want to reset paramIndex 
+    // to 0 because we are about to process its callbacks from the beginning.
+    // This ensures that when we encounter a new route parameter, we start with 
+    // the first callback associated with that parameter.
     paramIndex = 0;
+    /**
+     * The key variable represents an object that describes a route parameter. It is an instance of the path-to-regexp library's Token class.
+       This object contains information about the route parameter, such as its name (name property) and whether it is a wildcard (wild property).
+       key.name holds the name of the route parameter.
+       ex:
+         key = { name: 'userId',
+          prefix: '/', 
+          delimiter: '/',
+           optional: false, 
+           repeat: false, 
+           partial: false, 
+           asterisk: false, 
+           pattern: '[^\\/]+?' }
+     */
     key = keys[i++];
-    name = key.name;
+    name = key.name;// The name variable holds the name of the current route parameter 
+    // being processed.
     paramVal = req.params[name];
-    paramCallbacks = params[name];
+    paramCallbacks = params[name]; 
+    // paramCallbacks is assigned the array of callback functions associated with the
+    // current route parameter.
+    // The params object holds route parameter names as keys, and the associated 
+    // values are arrays of middleware functions/callbacks.
+
     paramCalled = called[name];
+    // paramCalled is assigned the object from the called object,
+    // which tracks whether a parameter has been processed before and its associated
+    // information.
+    // The called object is used to store information about whether a parameter has 
+    // been called before, its value, and any errors associated with it.
 
     if (paramVal === undefined || !paramCallbacks) {
+      // checks whether the current route parameter has a defined value (paramVal)
+      // or if there are associated middleware functions/callbacks (paramCallbacks). 
+      // If either condition is true, it means there are no further middleware 
+      // functions to process for the current parameter, and the param function is 
+      // immediately invoked, moving on to the next parameter or completing the 
+      // parameter processing.
       return param();
     }
 
     // param previously called with same value or error occurred
     if (paramCalled && (paramCalled.match === paramVal
       || (paramCalled.error && paramCalled.error !== 'route'))) {
-      // restore value
+        // checks whether the current route parameter (paramVal) has been previously
+        // called with the same value or if an error occurred during its processing. 
+        // If either condition is true, it restores the original value of the parameter 
+        // (paramCalled.value) and moves on to the next parameter by invoking the param 
+        // function.
+      
+
+      // Restores the original value of the parameter (paramCalled.value) in the 
+      // req.params object.
       req.params[name] = paramCalled.value;
 
       // next param
+      // Invokes the param function with the error type from the previous call 
+      // (paramCalled.error). This effectively skips the middleware functions associated 
+      // with the current parameter and moves on to the next parameter.
       return param(paramCalled.error);
     }
 
+
+    /**
+     * Creates an object ({ error: null, match: paramVal, value: paramVal }) representing 
+     * the state of the parameter during its processing.
+     * 
+       Assigns this object to both called[name] and paramCalled. This means that 
+       called[name] and paramCalled now reference the same object.
+
+       called: This object is used to keep track of the state of all route parameters. 
+              It is an associative array where the keys are parameter names, and the 
+              values are objects representing the parameter state.
+
+       paramCalled: This variable is a reference to the object representing the state 
+               of the current parameter.
+     */
     called[name] = paramCalled = {
       error: null,
       match: paramVal,
       value: paramVal
     };
-
+    
+    // Invokes the paramCallback function, initiating the processing of the next 
+    // middleware function associated with the parameter.
     paramCallback();
   }
 
-  // single param callbacks
+
+  // This function is responsible for executing the individual middleware functions 
+  // associated with the parameter. It will be called iteratively until all middleware 
+  // functions have been processed.
   function paramCallback(err) {
+    // Get the middleware function associated with the parameter
     var fn = paramCallbacks[paramIndex++];
 
     // store updated value
+    // Store the updated value of the parameter
     paramCalled.value = req.params[key.name];
 
+
+    // If an error occurred during middleware processing
     if (err) {
       // store error
+      // Store the error in the parameter's state
       paramCalled.error = err;
+      // Invoke the next middleware function in the error state
       param(err);
       return;
     }
 
+    // If there are no more middleware functions for the parameter, exit
     if (!fn) return param();
 
     try {
+      // Invoke the middleware function with required parameters
       fn(req, res, paramCallback, paramVal, key.name);
     } catch (e) {
+       // If an exception occurs during middleware execution, handle it
       paramCallback(e);
     }
   }
 
+  // The param() function is invoked at the end to continue the processing of the 
+  // next middleware function or parameter in the chain.
   param();
 };
 
