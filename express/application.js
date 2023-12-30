@@ -200,20 +200,77 @@ app.use = function use(fn) {// takes a middleware as an argument
 
 
         // restore .app property on req and res
+        /**
+         * const express = require('express');
+           const mainApp = express();
+
+           // Middleware that modifies req and res
+           const subApp = express();
+           subApp.use((req, res, next) => {
+            req.customProperty = 'Hello from subApp!';
+            res.send('Response from subApp');
+           });
+
+          // Mount subApp as middleware in mainApp
+             mainApp.use('/subpath', subApp);
+
+          // Main route in mainApp
+               mainApp.get('/', (req, res) => {
+                res.send(`Main App - ${req.customProperty}`);
+              });
+
+
+
+         * 
+         */
+        // now here supapp is acting as a middleware and that is adding or doing something with 
+        // req and res object,but after that middleware work get done,we have to
+        // restore the req and res object for main app
+
+        // This block of code is part of the implementation inside the app.use method in Express,
+        // where it is handling the case when a mounted middleware is an Express application 
+        // (or router)
+
+        // router.use(path, function mounted_app(...): This line is instructing the router to 
+        // use the provided function (mounted_app) as middleware for the specified path. The 
+        // mounted_app function will be invoked when a request matches the specified path.
         router.use(path, function mounted_app(req, res, next) {
+
+            // var orig = req.app;: This line stores a reference to the original req.app 
+            // (Express application) before the current middleware is invoked. It's important 
+            // to keep track of the original application because the middleware may modify req.app,
+            // and it needs to be restored to its original state after the middleware has processed
+            // the request.
             var orig = req.app;
             fn.handle(req, res, function (err) {
+                // fn is able to use handle function because we have set
+                // fn.parent=this in above line
+
+                // After the middleware has processed the request, these lines restore the
+                // original prototypes of req and res objects.
                 setPrototypeOf(req, orig.request)
                 setPrototypeOf(res, orig.response)
+
+                // Finally, the next function is called to pass control to the next middleware
+                // in the stack. If an error occurred during the processing of the middleware,
+                // it can be passed to the next function, triggering error handling middleware
+                // or the default error handler
                 next(err);
             });
         });
 
         // mounted an app
+        // This event emission is a way for an Express application to signal that it has been
+        // mounted as middleware onto another Express application.
         fn.emit('mount', this);
+
+        // this value refers to the Express application instance (app) on which the app.use 
+        // method is called. By passing this as the second argument, the callback function 
+        // inside forEach can access the properties and methods of the Express application.
     }, this);
 
     return this;
+    //for the chaining purpose
 };
 
 
@@ -331,13 +388,17 @@ app.disable = function disable(setting) {
  * Delegate `.VERB(...)` calls to `router.VERB(...)`.
  */
 
+// defination for app.get() or app.post()
 methods.forEach(function (method) {
+
+    // same to app.get or app.post
     app[method] = function (path) {
         if (method === 'get' && arguments.length === 1) {
             // app.get(setting)
             return this.set(path);
         }
 
+        //  Ensures that the application has a router instance. If not, it creates one.
         this.lazyrouter();
 
         var route = this._router.route(path);

@@ -149,7 +149,36 @@ proto.handle = function handle(req, res, out) {
   // manage inter-router variables
   var parentParams = req.params;
   var parentUrl = req.baseUrl || '';
+
+  // handling the restoration of certain properties on the req (request) object 
+  // we are passing baseurl,next,params to restore these parameters of req object
+  // out is the function which will get executed,actually it is a middleware,
+  // subapp middleware 
   var done = restore(out, req, 'baseUrl', 'next', 'params');
+  // here done is a function which when called restore the provided parameters of req object
+  /**
+   * By restoring 'baseUrl' after the middleware or router completes its processing, it ensures 
+   * that subsequent middleware or routers in the stack receive the correct baseUrl
+   */
+
+  /**
+   * 'next':
+
+             req.next is a reference to the next function in the middleware stack. Middleware functions 
+             can modify or replace this function to control the flow of execution.
+
+             Restoring 'next' ensures that the original next function is available for subsequent middleware 
+             or routers. This is crucial for maintaining the correct flow of control through the middleware stack.
+   */
+  /**
+   * 'params':
+
+             req.params holds the route parameters extracted from the URL. In the context of routers, 
+             these parameters may be modified during the handling of a request.
+
+             Restoring 'params' is necessary to ensure that subsequent middleware or routers 
+             receive the original route parameters.
+   */
 
   // setup next layer
   req.next = next;
@@ -163,43 +192,70 @@ proto.handle = function handle(req, res, out) {
   }
 
   // setup basic req values
+  // if it a next route,then parent url become base for this route
   req.baseUrl = parentUrl;
+ 
+  // This line ensures that req.originalUrl retains its original value, even if subsequent middleware 
+  // functions modify req.url. It prevents modifications to req.url from affecting the original URL.
   req.originalUrl = req.originalUrl || req.url;
 
   next();
 
+  // the next function is responsible for managing the flow of control through the middleware stack, 
+  // handling errors, and ensuring the proper restoration of the request object's state after each layer's processing
   function next(err) {
+
+    // it suggests that if an error of type 'route' is encountered, 
+    // layerError is set to null to indicate that there is no specific error related to a route
     var layerError = err === 'route'
       ? null
       : err;
 
     // remove added slash
+    // if there is a slash in the req.url,so remove it
     if (slashAdded) {
       req.url = req.url.slice(1)
       slashAdded = false;
     }
 
     // restore altered req.url
+    // The purpose of this block is to handle cases where a portion of the URL path was temporarily removed 
+    // for processing within the middleware or routing logic. After the processing is done, it restores 
+    // the URL to its original state. 
     if (removed.length !== 0) {
+
+        // restoring the baseUrl from parentUrl
       req.baseUrl = parentUrl;
       req.url = protohost + removed + req.url.slice(protohost.length)
       removed = '';
     }
 
     // signal to exit router
+    // This condition checks whether the layerError variable is set to the string value 'router'. 
+    // This typically indicates that the current layer encountered an error related to routing, and the router should exit.
     if (layerError === 'router') {
-      setImmediate(done, null)
+ 
+        // If the condition is true, it calls the done function asynchronously using setImmediate. 
+        // The done function is typically a callback that signals the completion of the router's handling. 
+        // Passing null as an argument to done implies that there was no error in the router.
+       setImmediate(done, null)
       return
     }
 
     // no more matching layers
     if (idx >= stack.length) {
+        // it means all middleware got executed and the array is traversed completely
       setImmediate(done, layerError);
       return;
     }
 
     // max sync stack
     if (++sync > 100) {
+
+     // If the condition is true (meaning there have been more than 100 synchronous calls), 
+     // it schedules the next function to be called asynchronously using setImmediate. This helps break
+     // the synchronous execution chain and allows the event loop to handle other tasks 
+     // before resuming the function execution.
       return setImmediate(next, err)
     }
 
@@ -207,6 +263,7 @@ proto.handle = function handle(req, res, out) {
     var path = getPathname(req);
 
     if (path == null) {
+        // the done function is called with the layerError, signaling that there's an error in processing the request.
       return done(layerError);
     }
 
@@ -215,9 +272,13 @@ proto.handle = function handle(req, res, out) {
     var match;
     var route;
 
+    // The loop is a fundamental part of Express routing, determining which layer (middleware or route) 
+    // should handle the incoming request.
     while (match !== true && idx < stack.length) {
-      layer = stack[idx++];
-      match = matchLayer(layer, path);
+      layer = stack[idx++]; // current layer
+      match = matchLayer(layer, path); // match value will be true if path is equal to this layer regular expression
+      // indication that this layer should get executed 
+
       route = layer.route;
 
       if (typeof match !== 'boolean') {
@@ -226,6 +287,7 @@ proto.handle = function handle(req, res, out) {
       }
 
       if (match !== true) {
+        // if not matched,just go to next layer
         continue;
       }
 
@@ -241,10 +303,13 @@ proto.handle = function handle(req, res, out) {
       }
 
       var method = req.method;
-      var has_method = route._handles_method(method);
+      var has_method = route._handles_method(method); // this method return true or false
+      // returns true if given arg(method here) can be handled by this route 
 
       // build up automatic options response
       if (!has_method && method === 'OPTIONS') {
+        // appendMethods simply append the given method to the list
+        // route._options() returns an array of HTTP methods that the route supports
         appendMethods(options, route._options());
       }
 
@@ -261,10 +326,12 @@ proto.handle = function handle(req, res, out) {
 
     // store route for dispatch on change
     if (route) {
+        // simply assigning route to req.route 
       req.route = route;
     }
 
     // Capture one-time layer values
+    // mergeParams is a function which simply add first arg object parameters to second obj
     req.params = self.mergeParams
       ? mergeParams(layer.params, parentParams)
       : layer.params;
@@ -505,7 +572,9 @@ proto.use = function use(fn) {
 
 };
 
+
 proto.route = function route(path) {
+    // creating a Route instance according to path provided
   var route = new Route(path);
 
   var layer = new Layer(path, {
@@ -515,15 +584,36 @@ proto.route = function route(path) {
   }, route.dispatch.bind(route));
 
   layer.route = route;
+  // This line explicitly associates the created layer with a specific route. This association is crucial
+  // because it allows Express to recognize that this layer is part of a route, and it helps in handling 
+  // route-specific behavior when processing requests.
 
+  // a "route-specific middleware" refers to middleware functions or handlers that are associated with a 
+  // specific route. This means that these middleware functions will only be executed when a 
+  // request matches the defined route.
+
+  // pussing this layer to the stack
   this.stack.push(layer);
+
+  // chaining purpose
   return route;
 };
 
 // create Router#VERB functions
+// first add(concat) all method to methods array
+// then for every method
+// 
 methods.concat('all').forEach(function(method){
+    // router.get
   proto[method] = function(path){
+    // route function returns a instance of Route and also this method add a layer related to this 
+    // path to the stack
     var route = this.route(path)
+    // route.get() or route.post()
+    //  It uses apply to set the context (route) and pass the remaining arguments 
+    // (starting from the second argument, skipping the path). 
+    // This is a way of dynamically calling the method based on the HTTP verb.
+    // simply speaking,route.get or post just push the layer into the stack
     route[method].apply(route, slice.call(arguments, 1));
     return this;
   };
@@ -542,6 +632,8 @@ function appendMethods(list, addition) {
 // get pathname of request
 function getPathname(req) {
   try {
+    // This line attempts to parse the URL from the provided req object using the parseUrl function 
+    // and then retrieves the pathname property from the parsed URL
     return parseUrl(req).pathname;
   } catch (err) {
     return undefined;
@@ -588,6 +680,7 @@ function matchLayer(layer, path) {
 }
 
 // merge params with parent params
+// this function simply add param to the parent object provided in the arg
 function mergeParams(params, parent) {
   if (typeof parent !== 'object' || !parent) {
     return params;
@@ -628,10 +721,16 @@ function mergeParams(params, parent) {
 
 // restore obj props after function
 function restore(fn, obj) {
+
+ // The restore function creates arrays (props and vals) to store the property names and their
+ // original values.
+ // length - 2 because fn and obj are function and object to be restore,exept these two,other
+ // arguments are props which need to be restore 
   var props = new Array(arguments.length - 2);
   var vals = new Array(arguments.length - 2);
 
   for (var i = 0; i < props.length; i++) {
+    // this loop just store the key value pair of original object
     props[i] = arguments[i + 2];
     vals[i] = obj[props[i]];
   }
@@ -641,7 +740,12 @@ function restore(fn, obj) {
     for (var i = 0; i < props.length; i++) {
       obj[props[i]] = vals[i];
     }
+    
 
+    // The purpose of this code is to invoke the original function (fn) within the correct context 
+    // (this) and with the same arguments that were initially passed to the enclosing function.
+    // It ensures that the original behavior of the function is preserved even though the 
+    // function might have been wrapped or modified in some way.
     return fn.apply(this, arguments);
   };
 }
